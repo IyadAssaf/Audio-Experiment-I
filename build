@@ -1,0 +1,2 @@
+#!/bin/sh
+gcc -framework CoreAudio -framework AudioToolbox -framework AudioUnit -framework CoreFoundation -o tone main.cpp && ./tone "$@"

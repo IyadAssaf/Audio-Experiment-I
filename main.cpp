@@ -1,188 +1,118 @@
-#include <iostream>
-#include <CoreFoundation/CoreFoundation.h>
+#include <stdlib.h>
+#include <math.h>
+#include <AudioToolbox/AudioQueue.h>
+#include <CoreAudio/CoreAudioTypes.h>
 #include <CoreAudio/CoreAudio.h>
-#include <AudioToolbox/AudioToolbox.h>
-#include <AudioUnit/AudioUnit.h>
+#include <CoreFoundation/CFRunLoop.h>
 
-#define PI 3.14159
+#define pi 3.14159265359
+#define NUM_CHANNELS 2
+#define NUM_BUFFERS 3
+#define BUFFER_SIZE 4096
+#define SAMPLE_TYPE short
+#define MAX_NUMBER 32767
+#define SAMPLE_RATE 44100
 
-double frequency = 880.0;
+unsigned int count;
+void callback(void *custom_data, AudioQueueRef queue, AudioQueueBufferRef buffer);
 
-typedef struct MyAUGraphPlayer
+int main()
 {
-    AudioStreamBasicDescription streamFormat;
+    count = 0;
+    unsigned int i;
 
-    AUGraph graph;
-    AUNode output;
-    AUNode mixer;
-    AUNode sine;
-    AudioUnit audioUnits[3];
-    AudioBufferList *inputBuffer;
+    AudioStreamBasicDescription format;
+    AudioQueueRef queue;
+    AudioQueueBufferRef buffers[NUM_BUFFERS];
 
-    Float64 firstInputSampleTime;
-    Float64 firstOutputSampleTime;
-    Float64 inToOutSampleTimeOffset;
-} MyAUGraphPlayer;
+    format.mSampleRate       = SAMPLE_RATE;
+    format.mFormatID         = kAudioFormatLinearPCM;
+    format.mFormatFlags      = kLinearPCMFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked;
+    format.mBitsPerChannel   = 8 * sizeof(SAMPLE_TYPE);
+    format.mChannelsPerFrame = NUM_CHANNELS;
+    format.mBytesPerFrame    = sizeof(SAMPLE_TYPE) * NUM_CHANNELS;
+    format.mFramesPerPacket  = 1;
+    format.mBytesPerPacket   = format.mBytesPerFrame * format.mFramesPerPacket;
+    format.mReserved         = 0;
 
-OSStatus SineWaveRenderCallback(void * inRefCon,
-                                AudioUnitRenderActionFlags * ioActionFlags,
-                                const AudioTimeStamp * inTimeStamp,
-                                UInt32 inBusNumber,
-                                UInt32 inNumberFrames,
-                                AudioBufferList * ioData)
-{
-    // inRefCon is the context pointer we passed in earlier when setting the render callback
-    double currentPhase = *((double *)inRefCon);
-    // ioData is where we're supposed to put the audio samples we've created
-    Float32 * outputBuffer = (Float32 *)ioData->mBuffers[0].mData;
-    // const double phaseStep = (frequency / 44100.) * (M_PI * 2.);
-	const double phaseStep = (frequency / 44100.) * (M_PI * 2.);
+    AudioQueueNewOutput(&format, callback, NULL, CFRunLoopGetCurrent(), kCFRunLoopCommonModes, 0, &queue);
 
-	for(int i = 0; i < inNumberFrames; i++) {
-		// printf("Current phase: %d , phase step: %d \n", sin(currentPhase), phaseStep);
-        outputBuffer[i] = sin(currentPhase);
-		printf("Output buffer: %d\n", sin(currentPhase));
-        currentPhase += phaseStep;
+    for (i = 0; i < NUM_BUFFERS; i++)
+    {
+        AudioQueueAllocateBuffer(queue, BUFFER_SIZE, &buffers[i]);
+        buffers[i]->mAudioDataByteSize = BUFFER_SIZE;
+        callback(NULL, queue, buffers[i]);
     }
 
-    // If we were doing stereo (or more), this would copy our sine wave samples
-    // to all of the remaining channels
-    for(int i = 1; i < ioData->mNumberBuffers; i++) {
-        memcpy(ioData->mBuffers[i].mData, outputBuffer, ioData->mBuffers[i].mDataByteSize);
-    }
-
-    // writing the current phase back to inRefCon so we can use it on the next call
-    *((double *)inRefCon) = currentPhase;
-    return noErr;
+    AudioQueueStart(queue, NULL);
+    CFRunLoopRun();
+    return 0;
 }
 
+void generateTone (AudioQueueBufferRef buffer, double freq, double amp) {
 
-int main(int argc, const char * argv[])
+    if(freq == 0.0) {
+        memset(buffer->mAudioData, 0, buffer->mAudioDataBytesCapacity);
+        buffer->mAudioDataByteSize = buffer->mAudioDataBytesCapacity;
+    } else {
+        // Make the buffer length a multiple of the wavelength for the output frequency.
+        int sampleCount = buffer->mAudioDataBytesCapacity / sizeof(SInt16);
+        double bufferLength = sampleCount;
+        double wavelength = SAMPLE_RATE / freq;
+        double repetitions = floor(bufferLength / wavelength);
+        if(repetitions > 0.0) {
+            sampleCount = round(wavelength * repetitions);
+        }
+        double x, y;
+        double sd = 1.0 / SAMPLE_RATE;
+        double max16bit = SHRT_MAX;
+        int i;
+
+        short *p = (short *)buffer->mAudioData;
+        int outputWaveform = 3;
+
+        for(i = 0; i < sampleCount; i++) {
+            x = i * sd * freq;
+            switch(outputWaveform) {
+                // sine
+                case 1:
+                    y = sin(x * 2.0 * M_PI);
+                    break;
+                // triangle
+                case 2:
+                    x = fmod(x, 1.0);
+                    if(x < 0.25)
+                        y = x * 4.0; // up 0.0 to 1.0
+                    else if(x < 0.75)
+                        y = (1.0 - x) * 4.0 - 2.0; // down 1.0 to -1.0
+                    else
+                        y = (x - 1.0) * 4.0; // up -1.0 to 0.0
+                    break;
+                // sawtooth
+                case 3:
+                    y  = 0.8 - fmod(x, 1.0) * 1.8;
+                    break;
+                // sqaure
+                case 4:
+                    y = (fmod(x, 1.0) < 0.5)? 0.7: -0.7;
+                    break;
+                default: y = 0; break;
+            }
+            p[i] = y * max16bit * amp;
+        }
+        buffer->mAudioDataByteSize = sampleCount * sizeof(SInt16);
+    }
+}
+
+void callback(void *custom_data, AudioQueueRef queue, AudioQueueBufferRef buffer)
 {
-    printf("args: %s", argv[1]);
-    if(argv[1]) {
-        frequency = (double)atoi(argv[1]);
-    }
+    generateTone(buffer, 220, 0.5);
+    AudioQueueEnqueueBuffer(queue, buffer, 0, NULL);
 
-    MyAUGraphPlayer *player = {0};
-    MyAUGraphPlayer p = {0};
-    player=&p;
-
-    NewAUGraph(&player->graph);
-
-    OSStatus result = 0;
-
-    AudioStreamBasicDescription ASBD = {
-        .mSampleRate       = 44100,
-        .mFormatID         = kAudioFormatLinearPCM,
-        .mFormatFlags      = kAudioFormatFlagsNativeFloatPacked,
-        .mChannelsPerFrame = 2,
-        .mFramesPerPacket  = 1,
-        .mBitsPerChannel   = sizeof(Float32) * 8,
-        .mBytesPerPacket   = sizeof(Float32),
-        .mBytesPerFrame    = sizeof(Float32)
-    };
-
-    //Output
+    if(count > SAMPLE_RATE * 10)
     {
-        AudioComponentDescription description = {
-            .componentType = kAudioUnitType_Output,
-            .componentSubType = kAudioUnitSubType_DefaultOutput,
-            .componentManufacturer = kAudioUnitManufacturer_Apple
-        };
-        result = AUGraphAddNode(player->graph, &description, &player->output);
-        printf("err: %d\n", result);
-        AudioComponent comp = AudioComponentFindNext(NULL, &description);
-        result = AudioComponentInstanceNew(comp, &player->audioUnits[0]);
-        printf("err: %d\n", result);
-        result = AudioUnitInitialize(player->audioUnits[0]);
-        printf("err: %d\n", result);
+        AudioQueueStop(queue, false);
+        AudioQueueDispose(queue, false);
+        CFRunLoopStop(CFRunLoopGetCurrent());
     }
-
-    //Mixer
-    {
-        AudioComponentDescription description = {
-            .componentType = kAudioUnitType_Mixer,
-            .componentSubType = kAudioUnitSubType_StereoMixer,
-            .componentManufacturer = kAudioUnitManufacturer_Apple
-        };
-        result = AUGraphAddNode(player->graph, &description, &player->mixer);
-        printf("err: %d\n", result);
-        AudioComponent comp = AudioComponentFindNext(NULL, &description);
-        result = AudioComponentInstanceNew(comp, &player->audioUnits[1]);
-        printf("err: %d\n", result);
-    }
-
-
-    //Sine
-    {
-        AudioComponentDescription description = {
-            .componentType = kAudioUnitType_Generator,
-            .componentSubType = kAudioUnitSubType_ScheduledSoundPlayer,
-            .componentManufacturer = kAudioUnitManufacturer_Apple
-        };
-        result = AUGraphAddNode(player->graph, &description, &player->sine);
-        printf("err: %d\n", result);
-        AudioComponent comp = AudioComponentFindNext(NULL, &description);
-        result = AudioComponentInstanceNew(comp, &player->audioUnits[2]);
-        printf("err: %d\n", result);
-        result = AudioUnitInitialize(player->audioUnits[2]);
-        printf("err: %d\n", result);
-
-    }
-
-    result = AUGraphConnectNodeInput(player->graph,
-                                     player->sine,
-                                     0,
-                                     player->mixer,
-                                     0);
-    printf("err: %d\n", result);
-
-    result = AUGraphConnectNodeInput(player->graph,
-                                     player->mixer,
-                                     0,
-                                     player->output,
-                                     0);
-    printf("err: %d\n", result);
-
-    result = AUGraphOpen(player->graph);
-    printf("err: %d\n", result);
-
-
-    UInt32 numbuses = 1;
-    result = AudioUnitSetProperty(player->audioUnits[1], kAudioUnitProperty_ElementCount, kAudioUnitScope_Input, 0, &numbuses, sizeof(numbuses));
-    printf("err: %d\n", result);
-
-    for (UInt32 i = 0; i <= numbuses; ++i) {
-        // setup render callback struct
-        AURenderCallbackStruct rcbs;
-        rcbs.inputProc = &SineWaveRenderCallback;
-        rcbs.inputProcRefCon = &player;
-
-        printf("set AUGraphSetNodeInputCallback\n");
-
-        // set a callback for the specified node's specified input
-        result = AUGraphSetNodeInputCallback(player->graph, player->mixer, i, &rcbs);
-        printf("AUGraphSetNodeInputCallback err: %d\n", result);
-
-        printf("set input bus %d, client kAudioUnitProperty_StreamFormat\n", (unsigned int)i);
-
-        // set the input stream format, this is the format of the audio for mixer input
-        result = AudioUnitSetProperty(player->audioUnits[1], kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, i, &ASBD, sizeof(ASBD));
-        printf("err: %d\n", result);
-    }
-
-    result = AudioUnitSetProperty(player->audioUnits[1], kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0, &ASBD, sizeof(ASBD));
-    printf("err: %d\n", result);
-
-    OSStatus status = AUGraphInitialize(player->graph);
-    printf("err: %d\n", status);
-
-    player->firstOutputSampleTime = -1;
-    AudioOutputUnitStart(player->audioUnits[0]);
-    AUGraphStart(player->graph);
-
-    getchar();
-
-    return 0;
 }

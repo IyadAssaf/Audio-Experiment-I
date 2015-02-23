@@ -1,3 +1,6 @@
+#include <node.h>
+#include <v8.h>
+
 #include <stdlib.h>
 #include <math.h>
 #include <AudioToolbox/AudioQueue.h>
@@ -13,6 +16,8 @@
 #define SAMPLE_TYPE short
 #define MAX_NUMBER 32767
 #define SAMPLE_RATE 44100
+
+using namespace v8;
 
 unsigned int count;
 void callback(void *custom_data, AudioQueueRef queue, AudioQueueBufferRef buffer);
@@ -44,7 +49,7 @@ int main()
         buffers[i]->mAudioDataByteSize = BUFFER_SIZE;
         callback(NULL, queue, buffers[i]);
     }
-    
+
     AudioQueueStart(queue, NULL);
     CFRunLoopRun();
     return 0;
@@ -107,7 +112,7 @@ void generateTone(AudioQueueBufferRef buffer, double freq, double amp, int outpu
 
 double ramp = 0.01;
 double freq = 660;
-Boolean up = true;
+bool up = true;
 void callback(void *custom_data, AudioQueueRef queue, AudioQueueBufferRef buffer)
 {
     generateTone(buffer, freq, ramp, 3);
@@ -132,3 +137,37 @@ void callback(void *custom_data, AudioQueueRef queue, AudioQueueBufferRef buffer
         }
     }
 }
+
+void playNote(double freq, double amplitude, int waveForm)
+{
+
+}
+
+Handle<Value> tones(const Arguments& args) {
+    HandleScope scope;
+    return scope.Close(String::New("Initialized"));
+}
+
+Handle<Value> start(const Arguments& args) {
+    HandleScope scope;
+    main();
+
+    return scope.Close(String::New("started"));
+}
+
+Handle<Value> play(const Arguments& args) {
+    HandleScope scope;
+
+
+
+    return scope.Close(String::New("started"));
+}
+
+void init(Handle<Object> target) {
+    target->Set(String::NewSymbol("start"),
+        FunctionTemplate::New(start)->GetFunction());
+
+    target->Set(String::NewSymbol("play"),
+        FunctionTemplate::New(play)->GetFunction());
+}
+NODE_MODULE(tones, init);

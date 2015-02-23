@@ -1,0 +1,14 @@
+{
+  "name": "tones",
+  "version": "1.0.0",
+  "description": "var output = setupOutput(), \tsine = setupSine();",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Iyad Assaf <iyadassaflondon@gmail.com>",
+  "license": "ISC",
+  "dependencies": {
+    "node-gyp": "^1.0.2"
+  }
+}

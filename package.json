@@ -1,14 +1,15 @@
 {
-  "name": "tones",
-  "version": "1.0.0",
-  "description": "var output = setupOutput(), \tsine = setupSine();",
+  "name": "Audio-Experiment-I",
+  "version": "0.0.1",
+  "description": "Making a simple oscillator with different waveform types using `Core Audio` controllable using Nodejs via `node-gyp`",
   "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
   "author": "Iyad Assaf <iyadassaflondon@gmail.com>",
-  "license": "ISC",
+  "license": "MIT",
   "dependencies": {
     "node-gyp": "^1.0.2"
+  },
+  "scripts": {
+      "post-install": "./node_modules/.bin/node-gyp configure && ./node_modules/.bin/node-gyp build",
+      "start": "node index.js"
   }
 }

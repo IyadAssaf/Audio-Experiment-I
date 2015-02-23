@@ -14,43 +14,48 @@
 #define MAX_NUMBER 32767
 #define SAMPLE_RATE 44100
 
-unsigned int count;
+typedef struct AQCallbackStruct {
+    double freq;
+    double amp;
+    int tableType;
+} AQCallbackStruct;
+
 void callback(void *custom_data, AudioQueueRef queue, AudioQueueBufferRef buffer);
 
-int main()
-{
-    count = 0;
-    unsigned int i;
+class Waveform {
 
     AudioStreamBasicDescription format;
     AudioQueueRef queue;
     AudioQueueBufferRef buffers[NUM_BUFFERS];
+public:
 
-    format.mSampleRate       = SAMPLE_RATE;
-    format.mFormatID         = kAudioFormatLinearPCM;
-    format.mFormatFlags      = kLinearPCMFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked;
-    format.mBitsPerChannel   = 8 * sizeof(SAMPLE_TYPE);
-    format.mChannelsPerFrame = NUM_CHANNELS;
-    format.mBytesPerFrame    = sizeof(SAMPLE_TYPE) * NUM_CHANNELS;
-    format.mFramesPerPacket  = 1;
-    format.mBytesPerPacket   = format.mBytesPerFrame * format.mFramesPerPacket;
-    format.mReserved         = 0;
-
-    AudioQueueNewOutput(&format, callback, NULL, CFRunLoopGetCurrent(), kCFRunLoopCommonModes, 0, &queue);
-
-    for (i = 0; i < NUM_BUFFERS; i++)
-    {
-        AudioQueueAllocateBuffer(queue, BUFFER_SIZE, &buffers[i]);
-        buffers[i]->mAudioDataByteSize = BUFFER_SIZE;
-        callback(NULL, queue, buffers[i]);
+    Waveform() {
+        format.mSampleRate       = SAMPLE_RATE;
+        format.mFormatID         = kAudioFormatLinearPCM;
+        format.mFormatFlags      = kLinearPCMFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked;
+        format.mBitsPerChannel   = 8 * sizeof(SAMPLE_TYPE);
+        format.mChannelsPerFrame = NUM_CHANNELS;
+        format.mBytesPerFrame    = sizeof(SAMPLE_TYPE) * NUM_CHANNELS;
+        format.mFramesPerPacket  = 1;
+        format.mBytesPerPacket   = format.mBytesPerFrame * format.mFramesPerPacket;
+        format.mReserved         = 0;
     }
-    
-    AudioQueueStart(queue, NULL);
-    CFRunLoopRun();
-    return 0;
-}
 
-void generateTone(AudioQueueBufferRef buffer, double freq, double amp, int outputWaveform) {
+    ~Waveform() {
+        AudioQueueStop(queue, false);
+        AudioQueueDispose(queue, false);
+        CFRunLoopStop(CFRunLoopGetCurrent());
+    }
+    void play(float freq, float amp, int tableType);
+private:
+    void generateTone(AudioQueueBufferRef buffer, double freq, double amp, int outputWaveform);
+};
+
+void callback(void *custom_data, AudioQueueRef queue, AudioQueueBufferRef buffer)
+{
+    AQCallbackStruct *aqc = (AQCallbackStruct *)custom_data;
+    double freq = aqc->freq;
+    double amp = aqc->amp;
 
     if(freq == 0.0) {
         memset(buffer->mAudioData, 0, buffer->mAudioDataBytesCapacity);
@@ -70,7 +75,7 @@ void generateTone(AudioQueueBufferRef buffer, double freq, double amp, int outpu
         int i;
 
         short *p = (short *)buffer->mAudioData;
-//        int outputWaveform = 1;
+        int outputWaveform = aqc->tableType;
 
         for(i = 0; i < sampleCount; i++) {
             x = i * sd * freq;
@@ -103,32 +108,26 @@ void generateTone(AudioQueueBufferRef buffer, double freq, double amp, int outpu
         }
         buffer->mAudioDataByteSize = sampleCount * sizeof(SInt16);
     }
-}
 
-double ramp = 0.01;
-double freq = 660;
-Boolean up = true;
-void callback(void *custom_data, AudioQueueRef queue, AudioQueueBufferRef buffer)
-{
-    generateTone(buffer, freq, ramp, 3);
-//    buffer = NULL;
     AudioQueueEnqueueBuffer(queue, buffer, 0, NULL);
-
-    if(up == true) {
-        if(ramp < 1.0) {
-            freq -= 10;
-            ramp += 0.01;
-        } else {
-            up = false;
-        }
-    }
-
-    if(up == false) {
-        if(ramp > 0.0) {
-            freq += 10;
-            ramp -= 0.01;
-        } else {
-            up = true;
-        }
-    }
 }
+
+
+void Waveform::play(float freq, float amp, int tableType)
+{
+    AQCallbackStruct out;
+    out.freq = freq;
+    out.amp = amp;
+	out.tableType = tableType;
+
+    AudioQueueNewOutput(&format, callback, &out, CFRunLoopGetCurrent(), kCFRunLoopCommonModes, 0, &queue);
+
+    for (unsigned int i = 0; i < NUM_BUFFERS; i++)
+    {
+        AudioQueueAllocateBuffer(queue, BUFFER_SIZE, &buffers[i]);
+        buffers[i]->mAudioDataByteSize = BUFFER_SIZE;
+        callback(&out, queue, buffers[i]);
+    }
+    AudioQueueStart(queue, NULL);
+    CFRunLoopRun();
+};
